@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="雁书，在局域网中把 TXT 转换后发送到 Kindle。">
+  <meta name="theme-color" content="#181818">
+  <title>雁书 InkFerry · TXT 到 Kindle</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+
+  <section id="unlockPanel" class="auth-shell" hidden aria-labelledby="unlockTitle">
+    <main class="auth-card">
+      <p class="eyebrow">雁书</p>
+      <h1 id="unlockTitle">输入管理密钥</h1>
+      <p class="section-lede">启动器会自动携带密钥。重新打开页面时，请输入同一台主机上的管理密钥。</p>
+      <form id="unlockForm" novalidate>
+        <div class="field">
+          <label for="adminKeyInput">管理密钥</label>
+          <input id="adminKeyInput" name="adminKey" type="password" autocomplete="current-password" inputmode="text" autocapitalize="off" spellcheck="false" required aria-describedby="unlockMessage">
+        </div>
+        <button class="button primary full-width" type="submit">进入雁书</button>
+        <p id="unlockMessage" class="form-message error" role="alert" hidden></p>
+      </form>
+      <p class="privacy-note">密钥只保存在当前浏览器的会话存储中，关闭页面后需要重新输入。</p>
+    </main>
+  </section>
+
+  <div id="app" hidden>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">纸</span>
+        <div>
+          <span class="brand-name">雁书</span>
+          <span class="brand-copy">InkFerry · TXT 到 Kindle</span>
+        </div>
+      </div>
+      <ul class="status-list" aria-label="服务状态">
+        <li id="connectionChip">连接检查中</li>
+        <li id="limitChip">大小检查中</li>
+        <li id="formatsChip">格式检查中</li>
+      </ul>
+    </header>
+
+    <main id="mainContent">
+      <section class="hero" aria-labelledby="pageTitle">
+        <div class="hero-copy">
+          <p class="eyebrow">本地 Wi-Fi 转换器</p>
+          <h1 id="pageTitle">把 TXT 送到你的 Kindle</h1>
+          <p class="section-lede">自动分章和排版。选定 Kindle 后一键转换并发送，文件留在你的 Wi‑Fi 内。</p>
+        </div>
+
+        <form id="uploadForm" class="upload-card" aria-labelledby="uploadTitle">
+          <div class="card-head">
+            <h2 id="uploadTitle">选择书稿</h2>
+            <span class="quiet">TXT · 保留原始文件</span>
+          </div>
+          <button id="dropzone" class="dropzone" type="button" aria-describedby="uploadHint uploadError">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4.5 7.5 9h3v7h3V9h3L12 4.5Zm-6.5 12h13v3h-13v-3Z"/></svg>
+            <strong>拖入 TXT 文件，或点击选择</strong>
+            <span>系统会先解析章节和编码，再进入排版预览。</span>
+          </button>
+          <input id="fileInput" class="visually-hidden" type="file" accept=".txt,text/plain" tabindex="-1" aria-hidden="true">
+          <div class="encoding-row">
+            <label for="encodingSelect">文字编码</label>
+            <select id="encodingSelect" aria-describedby="encodingNote">
+              <option value="auto" selected>自动识别</option>
+              <option value="utf-8">UTF-8</option>
+              <option value="gb18030">GB18030</option>
+              <option value="big5">Big5</option>
+              <option value="utf-16">UTF-16</option>
+            </select>
+            <p id="encodingNote" class="quiet">中文文件通常保持自动识别即可。</p>
+          </div>
+          <button id="chooseButton" class="button primary full-width" type="button">选择 TXT 文件</button>
+          <p id="uploadHint" class="form-message" aria-live="polite"></p>
+          <p id="uploadError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
+          <div id="uploadSkeleton" class="skeleton-stack" hidden aria-hidden="true">
+            <span class="skeleton title-line"></span>
+            <span class="skeleton line"></span>
+            <span class="skeleton short-line"></span>
+          </div>
+        </form>
+      </section>
+
+      <div class="workspace">
+        <section id="draftSection" class="panel" hidden aria-labelledby="draftTitle">
+          <div class="section-head">
+            <h2 id="draftTitle">书稿与排版</h2>
+            <span id="draftMeta" class="quiet"></span>
+          </div>
+
+          <dl id="draftStats" class="stat-grid" aria-label="书稿信息"></dl>
+
+          <div class="edit-grid">
+            <div class="field">
+              <label for="titleInput">书名</label>
+              <input id="titleInput" type="text" maxlength="120" autocomplete="off" spellcheck="false" aria-describedby="titleNote">
+              <p id="titleNote" class="quiet">Kindle 书库中显示的名称。</p>
+            </div>
+            <div class="field">
+              <label for="authorInput">作者</label>
+              <input id="authorInput" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+
+          <div class="settings-grid">
+            <fieldset class="choice-set">
+              <legend>版式</legend>
+              <input class="choice-input" id="styleClassic" type="radio" name="bookStyle" value="classic" checked>
+              <label class="choice-card" for="styleClassic"><strong>经典版式</strong><span>页边留白更宽，段落节奏安静。</span></label>
+              <input class="choice-input" id="styleCompact" type="radio" name="bookStyle" value="compact">
+              <label class="choice-card" for="styleCompact"><strong>紧凑版式</strong><span>减少空隙，适合长篇连续阅读。</span></label>
+            </fieldset>
+
+            <fieldset class="choice-set">
+              <legend>章节</legend>
+              <input class="choice-input" id="chapterAuto" type="radio" name="chapterMode" value="auto" checked>
+              <label class="choice-card" for="chapterAuto"><strong>自动分章</strong><span>识别常见章节标题。</span></label>
+              <input class="choice-input" id="chapterSingle" type="radio" name="chapterMode" value="single">
+              <label class="choice-card" for="chapterSingle"><strong>单章合并</strong><span>整本作为一章，保留原顺序。</span></label>
+            </fieldset>
+
+            <fieldset class="choice-set format-set">
+              <legend>输出格式</legend>
+              <input class="choice-input" id="formatMobi" type="radio" name="bookFormat" value="mobi" checked>
+              <label class="choice-card" for="formatMobi"><strong>MOBI</strong><span>无线收书首选。</span></label>
+              <input class="choice-input" id="formatEpub" type="radio" name="bookFormat" value="epub">
+              <label class="choice-card" for="formatEpub"><strong>EPUB</strong><span>通用性强，也适合存档。</span></label>
+            </fieldset>
+          </div>
+          <div class="action-card">
+            <div class="primary-action">
+              <button id="sendButton" class="button primary large" type="button">发送到 Kindle</button>
+              <p id="sendHint" class="quiet"></p>
+            </div>
+            <div class="secondary-actions">
+              <button id="convertButton" class="button secondary" type="button">仅转换并下载</button>
+              <button id="currentDownloadButton" class="button ghost" type="button" hidden>下载当前文件</button>
+            </div>
+            <p id="bookStatus" class="form-message" aria-live="polite"></p>
+            <p id="bookError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
+            <p id="currentBook" class="result-line" hidden></p>
+
+            <div id="transferStatus" class="transfer-status" hidden aria-labelledby="transferTitle">
+              <div class="transfer-head">
+                <h3 id="transferTitle">发送状态</h3>
+                <p id="transferMessage" aria-live="polite"></p>
+              </div>
+              <ol id="transferSteps" class="transfer-steps"></ol>
+              <button id="checkTransferButton" class="button ghost small" type="button" hidden>再次检查下载状态</button>
+              <p id="transferError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
+              <p class="quiet">在 Kindle 收件箱点下载，然后到 Kindle 图书馆打开。</p>
+            </div>
+          </div>
+
+          <section class="preview" aria-labelledby="previewHeading">
+            <div class="section-head">
+              <h3 id="previewHeading">排版预览</h3>
+              <span class="quiet">选择章节查看样张</span>
+            </div>
+            <div id="chapterList" class="chapter-list" aria-label="样章列表"></div>
+            <article class="book-page">
+              <header>
+                <h4 id="previewTitle"></h4>
+                <span id="previewAuthor"></span>
+              </header>
+              <div id="previewBody" class="book-body" aria-live="polite"></div>
+            </article>
+          </section>
+        </section>
+
+        <div class="side-column">
+          <section id="devicesSection" class="panel" aria-labelledby="devicesTitle">
+            <div class="section-head">
+              <h2 id="devicesTitle">Kindle 设备</h2>
+              <span class="quiet">一次配对，重复使用</span>
+            </div>
+            <p class="section-copy">在 Kindle 浏览器打开收件地址，等设备出现在下方，再点「配对」。</p>
+            <div class="field">
+              <label for="receiverLinkInput">Kindle 收件地址</label>
+              <input id="receiverLinkInput" type="text" readonly spellcheck="false">
+              <p id="receiverNetworkNote" class="quiet" aria-live="polite" hidden></p>
+            </div>
+            <div id="deviceSkeleton" class="skeleton-stack" hidden aria-hidden="true">
+              <span class="skeleton line"></span>
+              <span class="skeleton line"></span>
+            </div>
+            <section class="discovery" aria-labelledby="discoveryTitle">
+              <h3 id="discoveryTitle">可配对设备</h3>
+              <p id="discoveryEmpty" class="quiet">等待 Kindle 打开收件页。</p>
+              <ul id="discoveryList" class="device-list" aria-label="可配对设备"></ul>
+            </section>
+            <ul id="deviceList" class="device-list"></ul>
+            <div id="deviceEmpty" class="empty-device">
+              <strong>还没有已保存的设备</strong>
+              <span>首次配对后，可以直接选择这台设备。</span>
+            </div>
+            <p id="deviceError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
+            <p id="deviceSuccess" class="form-message success" aria-live="polite" hidden></p>
+
+            <details class="pair-fallback">
+              <summary id="pairTitle">使用配对码</summary>
+              <form id="pairForm" class="pair-form" novalidate aria-labelledby="pairTitle">
+                <div class="field">
+                  <label for="pairCodeInput">六位配对码</label>
+                  <input id="pairCodeInput" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" required aria-describedby="pairCodeNote">
+                  <p id="pairCodeNote" class="quiet">配对码十分钟有效，过期可在 Kindle 上刷新。</p>
+                </div>
+                <div class="field">
+                  <label for="pairNameInput">设备名称</label>
+                  <input id="pairNameInput" type="text" value="我的 Kindle" maxlength="40" autocomplete="off">
+                </div>
+                <button id="pairSubmit" class="button secondary full-width" type="submit">配对设备</button>
+              </form>
+            </details>
+          </section>
+
+          <section id="senderAccessSection" class="panel" aria-labelledby="accessTitle">
+            <div class="section-head">
+              <h2 id="accessTitle">手机访问</h2>
+              <span class="quiet">可信局域网</span>
+            </div>
+            <p class="section-copy">复制本机访问链接，在手机浏览器打开后可继续上传或发送。链接包含当前访问密钥。</p>
+            <div class="field">
+              <label for="senderSelect">访问地址</label>
+              <select id="senderSelect" aria-describedby="accessNote"></select>
+            </div>
+            <div class="copy-row">
+              <label class="visually-hidden" for="senderLinkInput">完整访问链接</label>
+              <input id="senderLinkInput" type="text" readonly autocapitalize="off" autocomplete="off" spellcheck="false" aria-describedby="accessNote">
+              <button id="copySenderButton" class="button secondary" type="button">复制</button>
+            </div>
+            <p id="accessNote" class="privacy-note">只在可信 Wi-Fi 中分享。传输文件保存在本机，不经过外部服务器。</p>
+            <p id="copyMessage" class="form-message" aria-live="polite"></p>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p id="runtimeHint">手机发送及 Kindle 收书时，请保持电脑上的雁书运行。</p>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+html { color: #151515; background: #fff; font: 17px/1.5 sans-serif; }
+body { margin: 0; }
+.shell { max-width: 440px; margin: 0 auto; padding: 24px 16px; }
+.brand, .label { color: #494949; font-size: 14px; margin: 0 0 8px; }
+.brand { font-weight: bold; }
+h1 { font-size: 24px; margin: 0 0 24px; }
+h2 { font-size: 18px; margin: 0 0 8px; }
+p { margin: 0 0 12px; }
+.identity, .books { padding: 16px; border: 1px solid #444; margin: 0 0 16px; }
+.code { font: bold 36px/1.15 monospace; letter-spacing: 4px; }
+ul { padding: 0; margin: 0; list-style: none; }
+li { padding: 12px 0; }
+li + li { border-top: 1px solid #888; }
+strong { display: block; overflow-wrap: break-word; }
+a { color: #111; display: inline-block; padding: 8px 0; }
+.download { background: #111; color: white; padding: 8px 12px; margin-top: 8px; }
