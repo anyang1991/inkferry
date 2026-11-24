@@ -41,7 +41,14 @@ PowerShell 可以用 `python server.py` 启动源码。端口占用时可用 `py
 
 在项目目录运行 `python -m unittest discover -s tests -v`，可验证文件格式、中文编码、目录定位和目标设备隔离。
 
-Windows 构建时，先在构建用的 Python 环境安装 PyInstaller，再运行 `.uild.ps1`。便携版输出为 `dist/InkFerry-Windows.zip`，包含可执行文件、使用说明和 Python 许可证。
+只有从源码打包 Windows 便携版时才需要这一步。在项目目录打开 PowerShell，运行下面两条命令。
+
+```powershell
+python -m pip install PyInstaller
+./build.ps1
+```
+
+生成的 `dist/InkFerry-Windows.zip` 包含可执行文件、使用说明和 Python 许可证。
 
 Android 构建需要 JDK 17 或更新版、Python 3.13、Android SDK 35 和 Build Tools 35.0.0。在 Windows 上运行 `./build-android.ps1`，在 `dist` 生成调试签名的 ARM64 手机和 x86‑64 模拟器 APK。脚本会在临时目录构建，支持原项目路径包含中文。
 
