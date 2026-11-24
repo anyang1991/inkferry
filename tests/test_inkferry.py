@@ -211,6 +211,67 @@ class LocalDeliveryTests(unittest.TestCase):
         self.call(self.sender, "/api/devices/" + device["id"], method="DELETE")
         self.call(self.receiver, link, expected=404)
 
+    def test_imported_mobi_goes_to_kindle_unchanged(self):
+        self.call(self.receiver, "/kindle", headers={"User-Agent": "Kindle Test"})
+        candidate, = self.call(self.sender, "/api/devices")["available"]
+        device = self.call(self.sender, "/api/devices", {"receiver_id": candidate["id"]})
+        self.assertFalse(device["supports_epub"])
+        draft = analyze(MANUSCRIPT.encode(), "渡口.txt")
+        mobi = build_book(draft, "夜航", "作者", "classic", "auto", "mobi")
+        headers = {"X-Filename": quote("原本.MOBI")}
+        self.call(self.sender, "/api/books", b"not an ebook", headers, expected=400)
+        locked = bytearray(mobi)
+        record0, = struct.unpack_from(">I", locked, 78)
+        struct.pack_into(">H", locked, record0 + 12, 2)
+        self.call(self.sender, "/api/books", bytes(locked), headers, expected=400)
+        book = self.call(self.sender, "/api/books", mobi, headers)
+        self.assertEqual("原本.mobi", book["filename"])
+        self.assertEqual(book, self.call(self.sender, "/api/books", mobi, headers))
+        transfer = self.call(self.sender, "/api/transfer", {
+            "book_id": book["id"], "device_id": device["id"],
+        })
+        link = f"/kindle/get/{transfer['id']}/book-{book['id'][:12]}.mobi"
+        self.call(self.other, "/kindle")
+        self.call(self.other, link, expected=404)
+        self.assertEqual(mobi, self.call(self.receiver, link))
+
+    def test_imported_epub_is_direct_for_browser_and_convertible_for_kindle(self):
+        for receiver, agent in [(self.receiver, "Kindle Test"), (self.other, "Mozilla/5.0")]:
+            self.call(receiver, "/kindle", headers={"User-Agent": agent})
+        browser_candidate, kindle_candidate = self.call(self.sender, "/api/devices")["available"]
+        browser = self.call(self.sender, "/api/devices", {"receiver_id": browser_candidate["id"]})
+        kindle = self.call(self.sender, "/api/devices", {"receiver_id": kindle_candidate["id"]})
+        self.assertTrue(browser["supports_epub"])
+        self.assertFalse(kindle["supports_epub"])
+        draft = analyze(MANUSCRIPT.encode(), "渡口.txt")
+        epub = build_book(draft, "夜航", "作者", "classic", "auto", "epub")
+        headers = {"X-Filename": "original.epub"}
+        self.call(self.sender, "/api/books", b"PK\x03\x04bad", headers, expected=400)
+        book = self.call(self.sender, "/api/books", epub, headers)
+        self.assertEqual("夜航", book["title"])
+        self.call(self.sender, "/api/transfer", {
+            "book_id": book["id"], "device_id": kindle["id"],
+        }, expected=400)
+        transfer = self.call(self.sender, "/api/transfer", {
+            "book_id": book["id"], "device_id": browser["id"],
+        })
+        inbox = self.call(self.other, "/kindle/inbox").decode()
+        link = re.search(r'href="(/kindle/get/[^"]+\.epub)"', inbox)[1]
+        self.assertIn(transfer["id"], link)
+        self.call(self.receiver, link, expected=404)
+        self.assertEqual(epub, self.call(self.other, link))
+
+        mobi = self.call(self.sender, "/api/convert-epub", {"book_id": book["id"]})
+        self.assertEqual(mobi, self.call(self.sender, "/api/convert-epub", {"book_id": book["id"]}))
+        transfer = self.call(self.sender, "/api/transfer", {
+            "book_id": mobi["id"], "device_id": kindle["id"],
+        })
+        received = self.call(self.receiver, f"/kindle/get/{transfer['id']}/book-{mobi['id'][:12]}.mobi")
+        self.assertEqual(b"BOOKMOBI", received[60:68])
+        self.assertIn("第一章 夜航".encode(), received)
+        self.assertIn("湖面有雾".encode(), received)
+        self.assertEqual(epub, self.call(self.sender, "/api/books/" + book["id"]))
+
     def test_opened_receivers_appear_and_pair_without_a_code(self):
         self.call(self.receiver, "/kindle", method="HEAD")
         self.assertEqual([], self.call(self.sender, "/api/devices")["available"])

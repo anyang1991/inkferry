@@ -12,7 +12,7 @@ $app = Join-Path $android "app"
 New-Item -ItemType Directory -Path $app -Force | Out-Null
 
 try {
-    $shared = "server.py", "book.py", "mobi.py", "index.html", "app.js",
+    $shared = "server.py", "book.py", "mobi.py", "ebook_upload.py", "epub_to_mobi.py", "index.html", "app.js",
         "style.css", "kindle.css", "kindle.js", "favicon.svg"
     foreach ($name in $shared) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $stage

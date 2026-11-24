@@ -23,7 +23,11 @@ const dom = {
   uploadSkeleton: document.getElementById("uploadSkeleton"),
   draftSection: document.getElementById("draftSection"),
   draftStats: document.getElementById("draftStats"),
+  draftTitle: document.getElementById("draftTitle"),
   draftMeta: document.getElementById("draftMeta"),
+  draftFields: document.getElementById("draftFields"),
+  draftSettings: document.getElementById("draftSettings"),
+  draftPreview: document.getElementById("draftPreview"),
   titleInput: document.getElementById("titleInput"),
   authorInput: document.getElementById("authorInput"),
   styleRadios: document.querySelectorAll('input[name="bookStyle"]'),
@@ -78,6 +82,7 @@ const state = {
   key: "",
   info: null,
   draft: null,
+  uploadedBook: null,
   book: null,
   transfer: null,
   transferWaitingTooLong: false,
@@ -280,21 +285,30 @@ function renderDiscovery() {
 
 function renderSendTarget() {
   const device = state.devices.find((item) => item.id === state.selectedDeviceId);
-  const format = selectedValue(dom.formatRadios);
+  const imported = state.uploadedBook;
+  const format = imported ? imported.format : selectedValue(dom.formatRadios);
   const busy = state.sending || state.converting || state.analyzing;
   const canConvert = Boolean(state.draft && state.info && state.info.formats.includes(format) && !busy);
-  const canSend = canConvert && device && format === "mobi";
+  const adaptsEpub = imported && format === "epub" && device && !device.supports_epub;
+  const canSend = device && (imported ? !busy : canConvert && (format === "mobi" || device.supports_epub));
 
   dom.sendButton.disabled = !canSend;
+  dom.sendButton.textContent = adaptsEpub ? "转为 MOBI 并发送" : (device?.supports_epub ? "发送到设备" : "发送到 Kindle");
+  dom.convertButton.hidden = Boolean(imported);
   dom.convertButton.disabled = !canConvert;
+  dom.currentDownloadButton.disabled = busy;
   dom.chooseButton.disabled = busy;
   dom.dropzone.disabled = busy;
-  if (!state.draft) {
-    dom.sendHint.textContent = "上传 TXT 后可选择已配对的 Kindle。";
-  } else if (format === "epub") {
-    dom.sendHint.textContent = "EPUB 可下载保存。向 Kindle 发送请选择 MOBI。";
+  if (!state.draft && !imported) {
+    dom.sendHint.textContent = "导入文件后可选择已配对的设备。";
   } else if (!device) {
-    dom.sendHint.textContent = "请在 Kindle 打开收件页，然后选择设备并配对。";
+    dom.sendHint.textContent = "在收件设备上打开收件页，然后选择设备并配对。";
+  } else if (adaptsEpub) {
+    dom.sendHint.textContent = "Kindle 局域网收书使用 MOBI。转换会保留文字和章节，图片与原版排版会省略。";
+  } else if (imported) {
+    dom.sendHint.textContent = `格式检查通过，将原样发送到 ${device.name}。`;
+  } else if (format === "epub" && !device.supports_epub) {
+    dom.sendHint.textContent = "EPUB 可下载保存。向 Kindle 发送请选择 MOBI。";
   } else {
     dom.sendHint.textContent = `将转换为 ${format.toUpperCase()} 后发送到 ${device.name}。`;
   }
@@ -305,10 +319,10 @@ function renderTransferSteps() {
   if (state.transfer) {
     const reached = state.transfer.status === "queued" || state.transfer.status === "downloaded";
     items.push(
-      ["upload", "书稿已解析", true],
-      ["converted", "转换完成", reached],
+      ["upload", state.uploadedBook ? "格式检查通过" : "书稿已解析", true],
+      ...(state.transfer.converts ? [["converted", "转换完成", reached]] : []),
       ["queued", "已进入传输队列", reached],
-      ["downloaded", "Kindle 已下载", state.transfer.status === "downloaded"]
+      ["downloaded", "收件设备已下载", state.transfer.status === "downloaded"]
     );
   } else {
     items.push(
@@ -534,7 +548,7 @@ async function downloadCurrentBook(book) {
     }
     return;
   }
-  setLiveMessage(dom.bookStatus, "正在下载转换文件。");
+  setLiveMessage(dom.bookStatus, "正在下载电子书。");
   try {
     const response = await fetch(`/api/books/${encodeURIComponent(target.id)}`, {
       headers: authHeaders()
@@ -582,20 +596,23 @@ async function pollTransfer(transferId, signal) {
 }
 
 async function sendToKindle() {
-  if (!state.draft || state.sending || state.converting) return;
+  if ((!state.draft && !state.uploadedBook) || state.sending || state.converting || state.analyzing) return;
   const deviceId = state.selectedDeviceId;
   const device = state.devices.find((item) => item.id === deviceId);
   if (!device) {
     dom.deviceError.hidden = false;
-    dom.deviceError.textContent = "请先选择或配对一台 Kindle。";
+    dom.deviceError.textContent = "请先选择或配对收件设备。";
     document.getElementById("devicesSection").scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
   stopTransferPolling();
+  const imported = state.uploadedBook;
+  const adaptsEpub = imported?.format === "epub" && !device.supports_epub;
+  const converts = !imported || adaptsEpub;
   state.sending = true;
   state.transferWaitingTooLong = false;
-  state.transfer = { phase: "converting", status: "pending", deviceId, deviceName: device.name };
+  state.transfer = { phase: converts ? "converting" : "sending", converts, status: "pending", deviceId, deviceName: device.name };
   renderSendTarget();
   setLiveMessage(dom.transferError, "");
   setLiveMessage(dom.bookError, "");
@@ -604,7 +621,16 @@ async function sendToKindle() {
   const controller = new AbortController();
   state.transferController = controller;
   try {
-    const book = await convertBook();
+    let book = imported;
+    if (adaptsEpub) {
+      book = await requestJson("/api/convert-epub", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ book_id: imported.id })
+      });
+    } else if (!book) {
+      book = await convertBook();
+    }
     const result = await requestJson("/api/transfer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -765,17 +791,20 @@ async function analyzeFile(file) {
   setLiveMessage(dom.uploadError, "");
   const maxSize = state.info ? state.info.max_upload_bytes : null;
   const isTxt = file.name.toLowerCase().endsWith(".txt");
-  if (!isTxt) {
-    setLiveMessage(dom.uploadError, "请选择 TXT 文件。");
+  if (!/\.(txt|epub|mobi)$/i.test(file.name)) {
+    setLiveMessage(dom.uploadError, "请选择 TXT、EPUB 或 MOBI 文件。");
+    dom.fileInput.value = "";
     return;
   }
   if (maxSize && file.size > maxSize) {
     setLiveMessage(dom.uploadError, `文件超过 ${formatBytes(maxSize)} 上限，请拆分后再上传。`);
+    dom.fileInput.value = "";
     return;
   }
 
   state.analyzing = true;
   state.draft = null;
+  state.uploadedBook = null;
   state.book = null;
   state.transfer = null;
   state.previewChapterIndex = 0;
@@ -783,14 +812,16 @@ async function analyzeFile(file) {
   dom.uploadSkeleton.hidden = false;
   dom.draftSection.hidden = true;
   dom.chooseButton.disabled = true;
-  dom.chooseButton.textContent = "正在解析";
+  dom.chooseButton.textContent = isTxt ? "正在解析" : "正在检查格式";
+  setLiveMessage(dom.bookStatus, "");
+  setLiveMessage(dom.bookError, "");
   renderCurrentBook();
   renderTransfer();
   renderSendTarget();
 
   try {
     const buffer = await file.arrayBuffer();
-    const result = await requestJson("/api/analyze", {
+    const result = await requestJson(isTxt ? "/api/analyze" : "/api/books", {
       method: "POST",
       headers: {
         "X-Filename": encodeURIComponent(file.name),
@@ -798,12 +829,24 @@ async function analyzeFile(file) {
       },
       body: buffer
     });
-    state.draft = result;
-    dom.titleInput.value = result.title || file.name.replace(/\.txt$/i, "");
-    dom.authorInput.value = result.author || "";
+    dom.draftTitle.textContent = isTxt ? "书稿与排版" : "已导入电子书";
+    dom.draftStats.hidden = !isTxt;
+    dom.draftFields.hidden = !isTxt;
+    dom.draftSettings.hidden = !isTxt;
+    dom.draftPreview.hidden = !isTxt;
+    dom.currentDownloadButton.textContent = isTxt ? "下载当前文件" : "下载原文件";
+    if (isTxt) {
+      state.draft = result;
+      dom.titleInput.value = result.title || file.name.replace(/\.txt$/i, "");
+      dom.authorInput.value = result.author || "";
+      renderDraft();
+    } else {
+      state.uploadedBook = state.book = result;
+      dom.draftMeta.textContent = `${result.title} · ${result.format.toUpperCase()}`;
+      renderCurrentBook();
+    }
     dom.draftSection.hidden = false;
-    renderDraft();
-    setLiveMessage(dom.uploadHint, `已解析 ${file.name}。`);
+    setLiveMessage(dom.uploadHint, isTxt ? `已解析 ${file.name}。` : `格式检查通过：${file.name}`);
   } catch (error) {
     if (!(error instanceof ApiError && error.status === 401)) setLiveMessage(dom.uploadError, error.message || "解析失败，请确认文件后重试。");
     dom.draftSection.hidden = true;
@@ -811,7 +854,7 @@ async function analyzeFile(file) {
     state.analyzing = false;
     dom.uploadSkeleton.hidden = true;
     dom.chooseButton.disabled = false;
-    dom.chooseButton.textContent = "选择 TXT 文件";
+    dom.chooseButton.textContent = "选择文件";
     dom.fileInput.value = "";
     renderSendTarget();
   }

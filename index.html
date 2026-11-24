@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="雁书，在局域网中把 TXT 转换后发送到 Kindle。">
+  <meta name="description" content="雁书，在局域网中转换和发送 TXT、EPUB 与 MOBI 电子书。">
   <meta name="theme-color" content="#181818">
-  <title>雁书 InkFerry · TXT 到 Kindle</title>
+  <title>雁书 InkFerry · Kindle 局域网传书</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -35,7 +35,7 @@
         <span class="brand-mark" aria-hidden="true">纸</span>
         <div>
           <span class="brand-name">雁书</span>
-          <span class="brand-copy">InkFerry · TXT 到 Kindle</span>
+          <span class="brand-copy">InkFerry · Kindle 局域网传书</span>
         </div>
       </div>
       <ul class="status-list" aria-label="服务状态">
@@ -49,21 +49,21 @@
       <section class="hero" aria-labelledby="pageTitle">
         <div class="hero-copy">
           <p class="eyebrow">本地 Wi-Fi 转换器</p>
-          <h1 id="pageTitle">把 TXT 送到你的 Kindle</h1>
-          <p class="section-lede">自动分章和排版。选定 Kindle 后一键转换并发送，文件留在你的 Wi‑Fi 内。</p>
+          <h1 id="pageTitle">把书送到你的 Kindle</h1>
+          <p class="section-lede">TXT 自动排版，MOBI 检查后直传，EPUB 可转成 MOBI 发给 Kindle。文件留在你的 Wi‑Fi 内。</p>
         </div>
 
         <form id="uploadForm" class="upload-card" aria-labelledby="uploadTitle">
           <div class="card-head">
             <h2 id="uploadTitle">选择书稿</h2>
-            <span class="quiet">TXT · 保留原始文件</span>
+            <span class="quiet">TXT、EPUB、MOBI</span>
           </div>
           <button id="dropzone" class="dropzone" type="button" aria-describedby="uploadHint uploadError">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4.5 7.5 9h3v7h3V9h3L12 4.5Zm-6.5 12h13v3h-13v-3Z"/></svg>
-            <strong>拖入 TXT 文件，或点击选择</strong>
-            <span>系统会先解析章节和编码，再进入排版预览。</span>
+            <strong>拖入文件，或点击选择</strong>
+            <span>TXT 可预览排版，EPUB 和 MOBI 会先检查格式。</span>
           </button>
-          <input id="fileInput" class="visually-hidden" type="file" accept=".txt,text/plain" tabindex="-1" aria-hidden="true">
+          <input id="fileInput" class="visually-hidden" type="file" accept=".txt,.epub,.mobi,text/plain,application/epub+zip,application/x-mobipocket-ebook" tabindex="-1" aria-hidden="true">
           <div class="encoding-row">
             <label for="encodingSelect">文字编码</label>
             <select id="encodingSelect" aria-describedby="encodingNote">
@@ -73,9 +73,9 @@
               <option value="big5">Big5</option>
               <option value="utf-16">UTF-16</option>
             </select>
-            <p id="encodingNote" class="quiet">中文文件通常保持自动识别即可。</p>
+            <p id="encodingNote" class="quiet">仅用于 TXT，通常保持自动识别即可。</p>
           </div>
-          <button id="chooseButton" class="button primary full-width" type="button">选择 TXT 文件</button>
+          <button id="chooseButton" class="button primary full-width" type="button">选择文件</button>
           <p id="uploadHint" class="form-message" aria-live="polite"></p>
           <p id="uploadError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
           <div id="uploadSkeleton" class="skeleton-stack" hidden aria-hidden="true">
@@ -95,7 +95,7 @@
 
           <dl id="draftStats" class="stat-grid" aria-label="书稿信息"></dl>
 
-          <div class="edit-grid">
+          <div id="draftFields" class="edit-grid">
             <div class="field">
               <label for="titleInput">书名</label>
               <input id="titleInput" type="text" maxlength="120" autocomplete="off" spellcheck="false" aria-describedby="titleNote">
@@ -107,7 +107,7 @@
             </div>
           </div>
 
-          <div class="settings-grid">
+          <div id="draftSettings" class="settings-grid">
             <fieldset class="choice-set">
               <legend>版式</legend>
               <input class="choice-input" id="styleClassic" type="radio" name="bookStyle" value="classic" checked>
@@ -153,11 +153,11 @@
               <ol id="transferSteps" class="transfer-steps"></ol>
               <button id="checkTransferButton" class="button ghost small" type="button" hidden>再次检查下载状态</button>
               <p id="transferError" class="form-message error" role="alert" aria-live="assertive" hidden></p>
-              <p class="quiet">在 Kindle 收件箱点下载，然后到 Kindle 图书馆打开。</p>
+              <p class="quiet">在收件设备上打开收件箱并下载。</p>
             </div>
           </div>
 
-          <section class="preview" aria-labelledby="previewHeading">
+          <section id="draftPreview" class="preview" aria-labelledby="previewHeading">
             <div class="section-head">
               <h3 id="previewHeading">排版预览</h3>
               <span class="quiet">选择章节查看样张</span>
@@ -176,10 +176,10 @@
         <div class="side-column">
           <section id="devicesSection" class="panel" aria-labelledby="devicesTitle">
             <div class="section-head">
-              <h2 id="devicesTitle">Kindle 设备</h2>
+              <h2 id="devicesTitle">收件设备</h2>
               <span class="quiet">一次配对，重复使用</span>
             </div>
-            <p class="section-copy">在 Kindle 浏览器打开收件地址，等设备出现在下方，再点「配对」。</p>
+            <p class="section-copy">在 Kindle 或其他设备的浏览器打开收件地址，等设备出现在下方，再点「配对」。</p>
             <div class="field">
               <label for="receiverLinkInput">Kindle 收件地址</label>
               <input id="receiverLinkInput" type="text" readonly spellcheck="false">

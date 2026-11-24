@@ -12,6 +12,7 @@ import time
 import traceback
 import webbrowser
 from dataclasses import dataclass
+from hashlib import sha256
 from html import escape
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,8 @@ from threading import BoundedSemaphore, RLock
 from urllib.parse import quote, unquote, urlsplit
 
 from book import Draft, analyze, build_book
+from ebook_upload import inspect_ebook
+from epub_to_mobi import epub_to_mobi
 
 ROOT = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else ROOT
@@ -87,7 +90,7 @@ class Book:
 class Receiver:
     discovery_id: str
     address: str = ""
-    is_kindle: bool = False
+    is_kindle: bool | None = None
     code: str = ""
     expires: float = 0
     seen: float = 0
@@ -195,21 +198,57 @@ class Shelf:
                 raise RequestError(409, "正在转换另一份文档，请稍后重试。")
         try:
             data = build_book(entry.draft, title, author, style, mode, output)
-            book_id = secrets.token_urlsafe(16)
-            safe_title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", title).strip(". ")[:90]
-            if not safe_title or re.fullmatch(r"(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", safe_title):
-                safe_title = "书籍" if not safe_title else "_" + safe_title
-            book = Book(
-                book_id, title, f"{safe_title}.{output}", output, data,
-                time.monotonic() + BOOK_TTL, render_key,
-            )
-            with self.lock:
-                self.expire()
-                self.make_book_room(len(data))
-                self.books[book_id] = book
-            return book
+            return self.store_book(title, title, output, data, render_key)
         finally:
             self.converting.release()
+
+    def upload_book(self, filename, data):
+        stem, _, extension = filename.replace("\\", "/").rsplit("/", 1)[-1].rpartition(".")
+        output = extension.lower()
+        if output not in FORMATS:
+            raise RequestError(400, "请选择 EPUB 或 MOBI 文件。")
+        render_key = ("upload", output, safe_book_stem(stem), sha256(data).hexdigest())
+        with self.lock:
+            self.expire()
+            for book in self.books.values():
+                if book.render_key == render_key:
+                    return book
+        title = inspect_ebook(data, output) or stem
+        title = re.sub(r"[\x00-\x1f\x7f\ud800-\udfff]", " ", title).strip()[:120] or "未命名书籍"
+        return self.store_book(title, stem, output, data, render_key)
+
+    def convert_epub(self, params):
+        book_id = field(params, "book_id", 36)
+        render_key = ("epub-to-mobi", book_id)
+        with self.lock:
+            self.expire()
+            source = self.books.get(book_id)
+            if not source:
+                raise RequestError(404, "书籍已过期，请重新导入。")
+            if source.format != "epub":
+                raise RequestError(400, "只有 EPUB 文件需要转换为 MOBI。")
+            for book in self.books.values():
+                if book.render_key == render_key:
+                    return book
+            if not self.converting.acquire(blocking=False):
+                raise RequestError(409, "正在转换另一份文档，请稍后重试。")
+        try:
+            data = epub_to_mobi(source.data, source.title)
+            return self.store_book(source.title, source.title, "mobi", data, render_key)
+        finally:
+            self.converting.release()
+
+    def store_book(self, title, stem, output, data, render_key):
+        with self.lock:
+            self.expire()
+            for book in self.books.values():
+                if book.render_key == render_key:
+                    return book
+            self.make_book_room(len(data))
+            book = Book(secrets.token_urlsafe(16), title, f"{safe_book_stem(stem)}.{output}",
+                        output, data, time.monotonic() + BOOK_TTL, render_key)
+            self.books[book.id] = book
+            return book
 
     def make_book_room(self, size):
         if size > BOOK_BUDGET:
@@ -226,7 +265,7 @@ class Shelf:
                 remaining_size -= len(book.data)
                 remaining_count -= 1
         if remaining_size > BOOK_BUDGET or remaining_count > BOOK_LIMIT:
-            raise RequestError(507, "暂存空间已满。请先在 Kindle 上下载部分待收书籍，再重试转换。")
+            raise RequestError(507, "暂存空间已满。请先下载部分待收书籍，再重试。")
         if evict:
             for book_id in evict:
                 del self.books[book_id]
@@ -235,7 +274,7 @@ class Shelf:
     def device_details(self, recipient):
         receiver = self.receivers.get(recipient)
         device = self.devices[recipient]
-        return dict(id=device["id"], name=device["name"],
+        return dict(id=device["id"], name=device["name"], supports_epub=device.get("kindle") is False,
                     online=bool(receiver and receiver.seen + 90 > time.monotonic()))
 
     def list_devices(self):
@@ -282,7 +321,9 @@ class Shelf:
                 recipient = self.by_code(field(params, "code", 6))
             if recipient not in self.devices and len(self.devices) >= DEVICE_LIMIT:
                 raise RequestError(409, "设备列表已满，请先移除一台 Kindle。")
-            device = dict(id=secrets.token_urlsafe(12), name=name or "我的 Kindle")
+            receiver = self.receivers[recipient]
+            device = dict(id=secrets.token_urlsafe(12), name=name or receiver.discovery_details()["name"],
+                          kindle=receiver.is_kindle)
             devices = {**self.devices, recipient: device}
             self.save_devices(devices)
             self.devices = devices
@@ -314,13 +355,15 @@ class Shelf:
             self.expire()
             book = self.books.get(book_id)
             if not book:
-                raise RequestError(404, "书籍已过期，请重新转换。")
-            if book.format == "epub":
-                raise RequestError(400, "Kindle 浏览器收书请选择 MOBI。")
+                raise RequestError(404, "书籍已过期，请重新导入或转换。")
             recipient = (
                 self.device_token(device_id) if device_id
                 else self.by_code(field(params, "code", 6))
             )
+            device = self.devices.get(recipient)
+            supports_epub = (device.get("kindle") if device else self.receivers[recipient].is_kindle) is False
+            if book.format == "epub" and not supports_epub:
+                raise RequestError(400, "此设备请选用「转为 MOBI 并发送」。")
             pending = [
                 item for item in self.transfers.values()
                 if item.recipient == recipient and item.status == "queued"
@@ -350,7 +393,14 @@ class Shelf:
                 cookie = secrets.token_urlsafe(24)
             receiver = self.refresh_receiver(cookie)
             receiver.address = address
-            receiver.is_kindle = "kindle" in user_agent.lower()
+            receiver.is_kindle = bool(re.search(r"kindle|lab126", user_agent, re.I)) if user_agent else None
+            device = self.devices.get(cookie)
+            if device and receiver.is_kindle is not None and (
+                device.get("kindle") is None or (receiver.is_kindle and not device["kindle"])
+            ):
+                devices = {**self.devices, cookie: {**device, "kindle": receiver.is_kindle}}
+                self.save_devices(devices)
+                self.devices = devices
             return cookie
 
     def refresh_receiver(self, cookie):
@@ -405,6 +455,15 @@ def field(params, name, limit):
     return value.strip()
 
 
+def safe_book_stem(stem):
+    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f\ud800-\udfff]', "_", stem).strip(". ")[:90]
+    if not stem:
+        return "书籍"
+    if re.fullmatch(r"(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", stem):
+        return "_" + stem
+    return stem
+
+
 def choice(params, name, options, default):
     value = field(params, name, 24) or default
     if value not in options:
@@ -439,7 +498,8 @@ def lan_addresses():
 
 def inbox_markup(device, discovery, code, items):
     if device:
-        identity = f'<p class="label">已配对 Kindle</p><h2>{escape(device["name"])}</h2>'
+        label = "已配对设备" if device.get("kindle") is False else "已配对 Kindle"
+        identity = f'<p class="label">{label}</p><h2>{escape(device["name"])}</h2>'
     else:
         identity = (
             '<p class="label">等待配对</p>'
@@ -596,12 +656,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, result)
         elif method == "POST" and path == "/api/convert":
             self.send_json(200, shelf.convert(self.read_json()).details())
+        elif method == "POST" and path == "/api/books":
+            filename = unquote(self.headers.get("X-Filename", ""))
+            self.send_json(200, shelf.upload_book(filename, self.read_body(MAX_UPLOAD)).details())
+        elif method == "POST" and path == "/api/convert-epub":
+            self.send_json(200, shelf.convert_epub(self.read_json()).details())
         elif method in ("GET", "HEAD") and (match := re.fullmatch(r"/api/books/([\w-]+)", path)):
             with shelf.lock:
                 shelf.expire()
                 book = shelf.books.get(match[1])
             if not book:
-                raise RequestError(404, "书籍已过期，请重新转换。")
+                raise RequestError(404, "书籍已过期，请重新导入或转换。")
             self.send_book(book)
         elif method == "GET" and path == "/api/devices":
             self.send_json(200, shelf.device_snapshot())
@@ -637,7 +702,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/kindle/inbox":
             markup = inbox_markup(*shelf.inbox(cookie))
             self.send_bytes(200, markup.encode("utf-8"), "text/html; charset=utf-8")
-        elif (match := re.fullmatch(r"/kindle/get/([\w-]+)/book-[\w-]+\.(mobi)", path)):
+        elif (match := re.fullmatch(r"/kindle/get/([\w-]+)/book-[\w-]+\.(mobi|epub)", path)):
             transfer, book = shelf.receiver_book(cookie, match[1], match[2])
             self.send_book(book, kindle=True)
             if method == "GET":

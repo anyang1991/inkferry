@@ -11,8 +11,8 @@ android {
         applicationId "press.aresan02.inkferry"
         minSdk 24
         targetSdk 35
-        versionCode 4
-        versionName "0.1.3"
+        versionCode 5
+        versionName "0.2.0"
     }
 
     flavorDimensions "architecture"
@@ -36,7 +36,7 @@ android {
 def sharedPython = layout.buildDirectory.dir("generated/inkferry")
 def stageSharedCode = tasks.register("stageSharedCode", Sync) {
     from(rootProject.projectDir.parentFile) {
-        include "server.py", "book.py", "mobi.py", "index.html", "app.js",
+        include "server.py", "book.py", "mobi.py", "ebook_upload.py", "epub_to_mobi.py", "index.html", "app.js",
                 "style.css", "kindle.css", "kindle.js", "favicon.svg"
     }
     into sharedPython
